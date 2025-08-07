@@ -14,8 +14,9 @@ If a question consists of multiple sub-problems and explicitly asks for more tha
 
 def extract_answer_content(text):
     """
-    Extract content between <answer> and </answer> tags with validation.
+    Extract content between the last <answer> and </answer> tags with validation.
     Returns None if validation fails or no valid answer found.
+    If multiple <answer> tags exist, uses the last properly closed one.
     """
     if not text:
         return None
@@ -23,18 +24,26 @@ def extract_answer_content(text):
     # Count <answer> and </answer> tags
     answer_open_count = text.count('<answer>')
     answer_close_count = text.count('</answer>')
-    if answer_open_count != 1 or answer_close_count != 1:
+    
+    # Must have at least one opening and closing tag
+    if answer_open_count == 0 or answer_close_count == 0:
         return None
     
-    # Extract content between <answer> and </answer>
-    start_idx = text.find('<answer>')
-    end_idx = text.find('</answer>')
+    # Find the last <answer> tag
+    last_answer_start = text.rfind('<answer>')
+    if last_answer_start == -1:
+        return None
     
-    if start_idx == -1 or end_idx == -1 or start_idx >= end_idx:
+    # Find the first </answer> tag that comes after the last <answer> tag
+    search_start = last_answer_start + len('<answer>')
+    answer_end = text.find('</answer>', search_start)
+    
+    # If no closing tag found after the last opening tag, it's invalid
+    if answer_end == -1:
         return None
     
     # Extract the content (skip the opening tag)
-    content = text[start_idx + len('<answer>'):end_idx].strip()
+    content = text[search_start:answer_end].strip()
     return content if content else None
 
 def init_llm(model_path, gpu_per_node):
