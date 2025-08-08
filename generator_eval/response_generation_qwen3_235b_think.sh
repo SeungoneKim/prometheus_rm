@@ -18,17 +18,17 @@ for i in "${selected_indices[@]}"; do
     sbatch << EOF
 #!/bin/bash
 
-#SBATCH --job-name=[self_motivated_lms]_qwen3_14b_think_response_${i}
-#SBATCH --output=qwen3_14b_think_response_${i}.txt
+#SBATCH --job-name=[self_motivated_lms]_qwen3_235b_think_response_${i}
+#SBATCH --output=qwen3_235b_think_response_${i}.txt
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
-#SBATCH --gpus-per-node=2
+#SBATCH --gpus-per-node=8
 #SBATCH --cpus-per-task=80
-#SBATCH --time=24:00:00
-#SBATCH --gres=gpu:2
+#SBATCH --time=48:00:00
+#SBATCH --gres=gpu:8
 #SBATCH --mem=1024G
 #SBATCH --account=ram
-#SBATCH --qos=alignment_shared
+#SBATCH --qos=ram_high
 
 export VLLM_WORKER_MULTIPROC_METHOD=spawn
 export NCCL_P2P_DISABLE=1
@@ -36,10 +36,10 @@ export VLLM_DISABLE_COMPILE_CACHE=1
 export VLLM_USE_V1=1
 
 python3 response_generation_qwen.py \\
-    --model_path /datasets/pretrained-llms/Qwen3-14B \\
-    --gpu_per_node 2 \\
+    --model_path /datasets/pretrained-llms/Qwen3-235B-A22B \\
+    --gpu_per_node 8 \\
     --input_file "./benchmarks.json" \\
-    --output_file "./qwen3_14b_think_responses/response_${i}.json" \\
+    --output_file "./qwen3_235b_think_responses/response_${i}.json" \\
     --start_index ${start_index} \\
     --end_index ${end_index} \\
     --temperature 0.6 \\

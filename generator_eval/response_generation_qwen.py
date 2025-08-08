@@ -9,8 +9,9 @@ import math
 import time
 
 system_message = """The reasoning process and answer should be enclosed within <think> </think> and <answer> </answer> tags, respectively (i.e., <think> reasoning process here </think> <answer> answer here </answer>).
-Between <answer> and </answer>, you should be concise and only provide the final prediction without any additional explanations (e.g., <answer> 0.5206 </answer>).
-If a question consists of multiple sub-problems and explicitly asks for more than one answer, write all answers inside <answer> and </answer> tags (e.g., <answer> *answer 1: $x$ *answer 2: $$L = \\frac{1}{2} m \\dot{x}^2 \\left(1 + \\frac{4x^2}{a^2}\\right) - \\frac{mgx^2}{a}$$ </answer>)."""
+Between <answer> and </answer>, you should be concise and only provide the final prediction without any additional explanations (e.g., <answer> C </answer>).
+If a question consists of multiple sub-problems and explicitly asks for more than one answer, write all answers inside <answer> and </answer> tags (e.g., <answer> *answer 1: $x$ *answer 2: $$L = \\frac{1}{2} m \\dot{x}^2 \\left(1 + \\frac{4x^2}{a^2}\\right) - \\frac{mgx^2}{a}$$ </answer>).
+Also, if your prediction is a real number, do not round it to a specific number of decimal places, but rather provide the full precision including the unit (e.g., <answer> 0.5206 m^2 </answer>)."""
 
 def extract_answer_content(text):
     """
