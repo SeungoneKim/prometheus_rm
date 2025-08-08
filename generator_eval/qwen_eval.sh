@@ -1,0 +1,55 @@
+#!/bin/bash
+
+total_items=17572
+num_chunks=10
+chunk_size=$((total_items / num_chunks))
+
+# Specify the indices you want to run
+selected_indices=(0)  # Change this array as needed
+
+for i in "${selected_indices[@]}"; do
+    start_index=$((i * chunk_size))
+    if [ $i -eq $((num_chunks - 1)) ]; then
+        end_index=$total_items
+    else
+        end_index=$(((i + 1) * chunk_size))
+    fi
+
+    sbatch << EOF
+#!/bin/bash
+
+#SBATCH --job-name=[self_motivated_lms]_qwen3_4b_think_response_qwen25_14b_eval_${i}
+#SBATCH --output=qwen3_4b_think_response_qwen25_14b_eval_${i}.txt
+#SBATCH --nodes=1
+#SBATCH --ntasks-per-node=1
+#SBATCH --gpus-per-node=2
+#SBATCH --cpus-per-task=80
+#SBATCH --time=24:00:00
+#SBATCH --gres=gpu:2
+#SBATCH --mem=1024G
+#SBATCH --account=ram
+#SBATCH --qos=alignment_shared
+
+export VLLM_WORKER_MULTIPROC_METHOD=spawn
+export NCCL_P2P_DISABLE=1
+export VLLM_DISABLE_COMPILE_CACHE=1
+export VLLM_USE_V1=1
+
+python3 qwen_eval.py \\
+    --model_path /datasets/pretrained-llms/Qwen2.5-14B-Instruct \\
+    --gpu_per_node 2 \\
+    --input_file "./qwen3_4b_think_responses/responses.json" \\
+    --output_file "./qwen3_4b_think_responses/qwen25_14b_eval_${i}.json" \\
+    --start_index ${start_index} \\
+    --end_index ${end_index} \\
+    --temperature 0.7 \\
+    --top_p 0.8 \\
+    --top_k 20 \\
+    --min_p 0 \\
+    --max_tokens 32768 \\
+    --enable_thinking
+EOF
+
+    echo "Submitted job $i with start_index=${start_index} and end_index=${end_index}"
+done
+
