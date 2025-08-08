@@ -79,7 +79,7 @@ def validate_output(text):
     return False, None
 
 def create_client():
-    API_key = "90679b494bad4e729238716195bced48"
+    API_key = ""
     return AzureOpenAI(
         api_version="2025-02-01-preview",  # latest API version
         api_key=API_key,
