@@ -103,7 +103,8 @@ def calculate_tokens(tokenizer, text):
     return len(tokens)
 
 def process_benchmarks(model_path, gpu_per_node, input_file, output_file, 
-                      temperature, top_p, top_k, min_p, max_tokens):
+                      temperature, top_p, top_k, min_p, max_tokens,
+                      start_index=None, end_index=None):
     # Initialize tokenizer for token counting
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
@@ -127,22 +128,30 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
         with open(input_file, "r") as f:
             all_items = json.load(f)
     
+    # Apply start_index and end_index slicing
+    if start_index is not None or end_index is not None:
+        items = all_items[start_index:end_index]
+        print(f"Processing slice [{start_index}:{end_index}] = {len(items)} items from {input_file}")
+    else:
+        items = all_items
+        print(f"Processing all {len(items)} items from {input_file}")
+    
     # First, handle items using simple string comparison (AIME/GPQA) or failed to process
     aime_gpqa_processed_count = 0
     failed_to_process_count = 0
     
-    for i, item in enumerate(all_items):
+    for i, item in enumerate(items):
         # Add token count for response if not already present
         if "response_tokens" not in item and "response" in item:
             item["response_tokens"] = calculate_tokens(tokenizer, item["response"])
-            all_items[i] = item
+            items[i] = item
         
         if ("judgment" not in item or "is_it_correct" not in item):
             # Handle [FAILED_TO_PROCESS] cases
             if item.get("extracted_answer") == "[FAILED_TO_PROCESS]":
                 item["judgment"] = ""
                 item["is_it_correct"] = False
-                all_items[i] = item
+                items[i] = item
                 failed_to_process_count += 1
     
     print(f"Processed {aime_gpqa_processed_count} items with 'AIME' or 'GPQA' in idx using simple string comparison")
@@ -150,7 +159,7 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
     
     # Filter items that need vLLM evaluation (not AIME/GPQA, not failed, don't have judgment)
     items_to_process = []
-    for i, item in enumerate(all_items):
+    for i, item in enumerate(items):
         if (item.get("extracted_answer") != "[FAILED_TO_PROCESS]" and
             ("judgment" not in item or "is_it_correct" not in item)):
             items_to_process.append((i, item))
@@ -224,8 +233,8 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
                 item["judgment"] = judgment
                 item["is_it_correct"] = is_correct
                 
-                # Update the original item in the all_items list
-                all_items[original_idx] = item
+                # Update the original item in the items list
+                items[original_idx] = item
             
             print(f"Successfully processed section {section_idx + 1}")
             
@@ -237,20 +246,40 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
                     item["judgment"] = "[FAILED_TO_PROCESS]"
                 if "is_it_correct" not in item:
                     item["is_it_correct"] = False
-                all_items[original_idx] = item
+                items[original_idx] = item
         
-        # Save progress after each section - save all items
+        # Save progress after each section with timing
+        save_start_time = time.time()
+        print(f"Starting to save progress after section {section_idx + 1}...")
+        
+        # Save progress after each section
+        if start_index is not None or end_index is not None:
+            # If we're working with a slice, save only the slice
+            items_to_save = items
+        else:
+            # Save all items (both completed and pending)
+            items_to_save = items
+        
+        # Log file info (avoid expensive size calculation)
+        print(f"Preparing to save {len(items_to_save)} items to {output_file}...")
+        
+        # Write with reduced indentation to save space and time
         with open(output_file, "w") as f:
-            json.dump(all_items, f, indent=4, ensure_ascii=False)
-        print(f"Saved {len(all_items)} total items to {output_file} (section {section_idx + 1} completed)")
+            json.dump(items_to_save, f, indent=2, ensure_ascii=False)
+        
+        save_end_time = time.time()
+        save_duration = save_end_time - save_start_time
+        completed_count = sum(1 for item in items_to_save if "judgment" in item and "is_it_correct" in item)
+        print(f"Saved {len(items_to_save)} total items ({completed_count} completed) to {output_file} (section {section_idx + 1} completed)")
+        print(f"Save operation took {save_duration:.2f} seconds")
         
         # Log the number of items processed so far
-        processed_count = sum(1 for item in all_items if "judgment" in item and "is_it_correct" in item)
-        print(f"Total items processed so far: {processed_count}")
+        processed_count = sum(1 for item in items if "judgment" in item and "is_it_correct" in item)
+        print(f"Total items processed so far: {processed_count}/{len(items)}")
     
     # Calculate benchmark-specific statistics
     benchmark_stats = {}
-    for item in all_items:
+    for item in items:
         idx = item.get("idx", "")
         if "/" in idx:
             benchmark = idx.split("/")[0]
@@ -282,8 +311,11 @@ if __name__ == "__main__":
     parser.add_argument("--top_k", type=int, default=-1, help="Top-k for sampling.")
     parser.add_argument("--min_p", type=float, default=0.0, help="Min-p for sampling.")
     parser.add_argument("--max_tokens", type=int, default=8192, help="Maximum tokens to generate.")
+    parser.add_argument("--start_index", type=int, help="Start index for data slicing.")
+    parser.add_argument("--end_index", type=int, help="End index for data slicing.")
     
     args = parser.parse_args()
     
     process_benchmarks(args.model_path, args.gpu_per_node, args.input_file, args.output_file,
-                      args.temperature, args.top_p, args.top_k, args.min_p, args.max_tokens)
+                      args.temperature, args.top_p, args.top_k, args.min_p, args.max_tokens,
+                      args.start_index, args.end_index)
