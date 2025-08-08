@@ -6,6 +6,15 @@ import argparse
 import time
 import math
 from transformers import AutoTokenizer
+from openai_harmony import (
+    HarmonyEncodingName,
+    load_harmony_encoding,
+    Conversation,
+    Message,
+    Role,
+    SystemContent,
+    DeveloperContent,
+)
 
 
 CONCISE_ZERO_SHOT = """### Question: [HERE_IS_THE_QUESTION]
@@ -83,7 +92,8 @@ def init_llm(model_path, gpu_per_node):
         enable_prefix_caching=True, 
         enable_chunked_prefill=True,
         swap_space=16,
-        max_num_seqs=1024)
+        max_num_seqs=1024,
+        trust_remote_code=True)
 
 def extract_judgment(judgment_str: str) -> tuple[str, bool]:
     """Extract judgment and determine if it's correct."""
@@ -104,6 +114,9 @@ def calculate_tokens(tokenizer, text):
 def process_benchmarks(model_path, gpu_per_node, input_file, output_file, 
                       temperature, top_p, top_k, min_p, max_tokens,
                       start_index=None, end_index=None):
+    # Initialize Harmony encoding
+    encoding = load_harmony_encoding(HarmonyEncodingName.HARMONY_GPT_OSS)
+    
     # Initialize tokenizer for token counting
     tokenizer = AutoTokenizer.from_pretrained(model_path)
     
@@ -172,6 +185,9 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
     # Initialize LLM
     llm = init_llm(model_path, gpu_per_node)
     
+    # Get Harmony stop tokens
+    stop_token_ids = encoding.stop_tokens_for_assistant_actions()
+    
     # Create sampling parameters
     sampling_params = SamplingParams(
         temperature=temperature, 
@@ -179,7 +195,7 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
         top_k=top_k, 
         min_p=min_p, 
         max_tokens=max_tokens,
-        stop=["<End of Judgment>"]
+        stop_token_ids=stop_token_ids
     )
     
     # Split into 10 sections
@@ -196,8 +212,8 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
         section_items = items_to_process[start_idx:end_idx]
         print(f"Processing section {section_idx + 1}/{num_sections} with {len(section_items)} items")
         
-        # Prepare prompts for this section
-        prompts = []
+        # Prepare prompts for this section using Harmony
+        prompt_token_ids = []
         for _, item in section_items:
             # Handle answer format
             if type(item["answer"]) == list:
@@ -209,25 +225,45 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
             # prompt_content = CONCISE_ZERO_SHOT.replace("[HERE_IS_THE_QUESTION]", item["question"]).replace("[HERE_IS_THE_GROUND_TRUTH]", ground_truth).replace("[HERE_IS_THE_CANDIDATE]", item["extracted_answer"])
             prompt_content = DETAILED_ZERO_SHOT.replace("[HERE_IS_THE_QUESTION]", item["question"]).replace("[HERE_IS_THE_GROUND_TRUTH]", ground_truth).replace("[HERE_IS_THE_CANDIDATE]", item["extracted_answer"])
             
-            # Use chat template format like in response_generation_qwen.py
-            messages = [
-                {"role": "user", "content": prompt_content}
-            ]
-            text = tokenizer.apply_chat_template(
-                messages,
-                tokenize=False,
-                add_generation_prompt=True
-            )
-            prompts.append(text)
+            # Create Harmony conversation
+            convo = Conversation.from_messages([
+                Message.from_role_and_content(Role.SYSTEM, SystemContent.new()),
+                Message.from_role_and_content(Role.USER, prompt_content)
+            ])
+            
+            # Render conversation for completion using Harmony
+            prefill_ids = encoding.render_conversation_for_completion(convo, Role.ASSISTANT)
+            prompt_token_ids.append(prefill_ids)
         
         try:
             # Run vLLM inference for this section
             print(f"Running vLLM inference for section {section_idx + 1}...")
-            batch_outputs = llm.generate(prompts, sampling_params)
+            batch_outputs = llm.generate(
+                prompt_token_ids=prompt_token_ids,
+                sampling_params=sampling_params
+            )
             
             # Process results and add to items
             for (original_idx, item), output in zip(section_items, batch_outputs):
-                judgment_output = output.outputs[0].text.strip()
+                # Get completion token IDs and parse with Harmony
+                output_tokens = output.outputs[0].token_ids
+                
+                # Parse the completion tokens back into structured messages
+                try:
+                    entries = encoding.parse_messages_from_completion_tokens(output_tokens, Role.ASSISTANT)
+                    # Extract text from the parsed entries
+                    judgment_output = ""
+                    for message in entries:
+                        if hasattr(message, 'content') and message.content:
+                            judgment_output += str(message.content)
+                    
+                    # Fallback to raw text if parsing fails
+                    if not judgment_output.strip():
+                        judgment_output = output.outputs[0].text.strip()
+                except Exception as e:
+                    print(f"Warning: Harmony parsing failed, using raw text: {e}")
+                    judgment_output = output.outputs[0].text.strip()
+                
                 judgment, is_correct = extract_judgment(judgment_output)
                 
                 # Add judgment and is_it_correct
@@ -302,16 +338,16 @@ def process_benchmarks(model_path, gpu_per_node, input_file, output_file,
     print(f"\nSuccessfully processed {len(items_to_process)} items and saved to {output_file}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Evaluate responses using Qwen model with vLLM.")
-    parser.add_argument("--model_path", type=str, required=True, help="Path to the model.")
+    parser = argparse.ArgumentParser(description="Evaluate responses using OSS model with vLLM and Harmony encoding.")
+    parser.add_argument("--model_path", type=str, default="openai/gpt-oss-120b", help="Path to the model.")
     parser.add_argument("--gpu_per_node", type=int, default=1, help="Number of GPUs per node.")
     parser.add_argument("--input_file", type=str, required=True, help="Path to the input JSON file.")
     parser.add_argument("--output_file", type=str, required=True, help="Path to the output JSON file.")
-    parser.add_argument("--temperature", type=float, default=0.0, help="Temperature for sampling.")
+    parser.add_argument("--temperature", type=float, default=1.0, help="Temperature for sampling.")
     parser.add_argument("--top_p", type=float, default=1.0, help="Top-p for sampling.")
     parser.add_argument("--top_k", type=int, default=-1, help="Top-k for sampling.")
     parser.add_argument("--min_p", type=float, default=0.0, help="Min-p for sampling.")
-    parser.add_argument("--max_tokens", type=int, default=8192, help="Maximum tokens to generate.")
+    parser.add_argument("--max_tokens", type=int, default=128, help="Maximum tokens to generate.")
     parser.add_argument("--start_index", type=int, help="Start index for data slicing.")
     parser.add_argument("--end_index", type=int, help="End index for data slicing.")
     
