@@ -1,6 +1,0 @@
-INFO 08-08 06:53:24 [__init__.py:239] Automatically detected platform cuda.
-usage: qwen_eval.py [-h] --model_path MODEL_PATH [--gpu_per_node GPU_PER_NODE]
-                    --input_file INPUT_FILE --output_file OUTPUT_FILE
-                    [--temperature TEMPERATURE] [--top_p TOP_P]
-                    [--top_k TOP_K] [--min_p MIN_P] [--max_tokens MAX_TOKENS]
-qwen_eval.py: error: unrecognized arguments: --start_index 0 --end_index 1757 --enable_thinking
